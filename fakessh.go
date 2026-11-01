@@ -7,14 +7,33 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/crypto/ssh"
 )
 
 var (
 	errBadPassword = errors.New("permission denied")
+	sshConnections = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "fakessh_ssh_connections_total",
+		Help: "Total number of accepted SSH TCP connections.",
+	})
+	activeConnections = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "fakessh_active_connections",
+		Help: "Number of SSH TCP connections currently being handled.",
+	})
+	sshConnectionErrors = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "fakessh_ssh_connection_errors_total",
+		Help: "Total number of SSH connections that ended with an error, including rejected authentication.",
+	})
+	passwordAttempts = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "fakessh_password_auth_attempts_total",
+		Help: "Total number of password authentication attempts.",
+	})
 	serverVersions = []string{
 		"SSH-2.0-OpenSSH_6.6.1p1 Ubuntu-2ubuntu2.3",
 		"SSH-2.0-OpenSSH_6.7p1 Debian-5+deb8u3",
@@ -28,6 +47,8 @@ var (
 )
 
 func main() {
+	prometheus.MustRegister(sshConnections, activeConnections, sshConnectionErrors, passwordAttempts)
+
 	if len(os.Args) > 1 {
 		logPath := fmt.Sprintf("%s/fakessh-%s.log", os.Args[1], time.Now().Format("2006-01-02-15-04-05-000"))
 		logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -40,6 +61,19 @@ func main() {
 	}
 
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+
+	metricsAddr := os.Getenv("PROMETHEUS_ADDR")
+	if metricsAddr == "" {
+		metricsAddr = ":2112"
+	}
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		log.Printf("Serving Prometheus metrics on %s/metrics", metricsAddr)
+		if err := http.ListenAndServe(metricsAddr, mux); err != nil {
+			log.Fatal("Failed to serve Prometheus metrics:", err)
+		}
+	}()
 
 	serverConfig := &ssh.ServerConfig{
 		MaxAuthTries:     6,
@@ -64,11 +98,14 @@ func main() {
 			log.Println("Failed to accept:", err)
 			break
 		}
+		sshConnections.Inc()
+		activeConnections.Inc()
 		go handleConn(conn, serverConfig)
 	}
 }
 
 func passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+	passwordAttempts.Inc()
 	log.Println(conn.RemoteAddr(), string(conn.ClientVersion()), conn.User(), string(password))
 	time.Sleep(100 * time.Millisecond)
 	return nil, errBadPassword
@@ -76,6 +113,9 @@ func passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions,
 
 func handleConn(conn net.Conn, serverConfig *ssh.ServerConfig) {
 	defer conn.Close()
+	defer activeConnections.Dec()
 	log.Println(conn.RemoteAddr())
-	ssh.NewServerConn(conn, serverConfig)
+	if _, _, _, err := ssh.NewServerConn(conn, serverConfig); err != nil {
+		sshConnectionErrors.Inc()
+	}
 }

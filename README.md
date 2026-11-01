@@ -26,6 +26,20 @@ docker run -d --restart=always -p 22:22 --name fakessh fffaraz/fakessh
 docker logs -f fakessh
 ```
 
+### Prometheus metrics
+
+FakeSSH exports Prometheus metrics at `http://localhost:2112/metrics` by default.
+For Docker, publish both ports to scrape metrics from outside the container:
+
+```
+docker run -d --restart=always -p 22:22 -p 2112:2112 --name fakessh fffaraz/fakessh
+```
+
+Set `PROMETHEUS_ADDR` to change the metrics listener address. When running
+directly on a host, use `127.0.0.1:2112` to restrict access to that host.
+Exported application metrics include SSH connections, active connections,
+password authentication attempts, and SSH connection errors.
+
 ### See also
 
 * [jaksi/sshesame](https://github.com/jaksi/sshesame) - A fake SSH server that lets everyone in and logs their activity.

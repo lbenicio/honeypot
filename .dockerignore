@@ -3,5 +3,6 @@
 volumes/
 .gitignore
 docker-compose.yml
-LICENSE
+LICENSE.txt
 README.md
+.DS_Store
