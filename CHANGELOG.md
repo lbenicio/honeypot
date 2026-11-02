@@ -5,6 +5,13 @@ Notable changes to this project are documented here. This changelog follows
 
 ## [Unreleased]
 
+### Added
+
+- A manually triggered GitHub Actions workflow to publish versioned GitHub
+  releases and multi-platform Docker images from `CHANGELOG.md`.
+- GitHub Actions run summaries with workflow results and build, test, and
+  release metrics.
+
 ## [0.1.0] - 2026-11-01
 
 ### Added

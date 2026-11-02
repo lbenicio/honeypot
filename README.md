@@ -40,6 +40,20 @@ directly on a host, use `127.0.0.1:2112` to restrict access to that host.
 Exported application metrics include SSH connections, active connections,
 password authentication attempts, and SSH connection errors.
 
+### Releases
+
+To publish a release, run **Publish release** from the Actions tab on the
+default branch. The workflow reads the first dated version heading in
+`CHANGELOG.md`, creates the matching `v<version>` GitHub release, and builds
+and publishes multi-platform Docker images tagged with the version and
+`latest`. It stops if that GitHub release, Git tag, or versioned Docker Hub tag
+already exists.
+
+Configure the `DOCKERHUB_USERNAME` repository variable and a Docker Hub
+personal access token in the `DOCKERHUB_TOKEN` repository secret before running
+the workflow. The configured account must have permission to push to
+`fffaraz/fakessh`.
+
 ### See also
 
 * [jaksi/sshesame](https://github.com/jaksi/sshesame) - A fake SSH server that lets everyone in and logs their activity.

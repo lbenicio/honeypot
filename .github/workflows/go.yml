@@ -1,28 +1,113 @@
-# This workflow will build a golang project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
-
-name: Unit tests
+name: Go CI
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [master]
   pull_request:
-    branches: [ "master" ]
+    branches: [master]
+
+permissions:
+  contents: read
 
 jobs:
-
   build:
+    name: Build and test
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+      - name: Start workflow timer
+        id: timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.27.3'
+      - name: Check out source
+        uses: actions/checkout@v6
 
-    - name: Build
-      run: go build -v ./...
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
-    - name: Test
-      run: go test -v ./...
+      - name: Record Go version
+        id: go_version
+        run: echo "version=$(go version | awk '{print $3}')" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        id: build
+        shell: bash
+        run: |
+          started_at=$(date +%s)
+          set +e
+          go build -v ./...
+          status=$?
+          set -e
+          echo "duration_seconds=$(($(date +%s) - started_at))" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Test
+        id: test
+        shell: bash
+        run: |
+          started_at=$(date +%s)
+          set +e
+          go test -v ./... 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+          status=${PIPESTATUS[0]}
+          set -e
+
+          {
+            echo "duration_seconds=$(($(date +%s) - started_at))"
+            echo "passed=$(grep -c '^--- PASS:' "$RUNNER_TEMP/go-test.log" || true)"
+            echo "failed=$(grep -c '^--- FAIL:' "$RUNNER_TEMP/go-test.log" || true)"
+            echo "skipped=$(grep -c '^--- SKIP:' "$RUNNER_TEMP/go-test.log" || true)"
+          } >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Write workflow summary
+        if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          BUILD_SECONDS: ${{ steps.build.outputs.duration_seconds }}
+          TEST_OUTCOME: ${{ steps.test.outcome }}
+          TEST_SECONDS: ${{ steps.test.outputs.duration_seconds }}
+          TEST_PASSED: ${{ steps.test.outputs.passed }}
+          TEST_FAILED: ${{ steps.test.outputs.failed }}
+          TEST_SKIPPED: ${{ steps.test.outputs.skipped }}
+          STARTED_AT: ${{ steps.timer.outputs.started_at }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          GO_VERSION: ${{ steps.go_version.outputs.version }}
+        shell: bash
+        run: |
+          started_at="${STARTED_AT:-$(date +%s)}"
+          elapsed_seconds=$(($(date +%s) - started_at))
+          ref_name="${REF_NAME//|/\\|}"
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## 🧪 ${WORKFLOW_NAME}
+
+          | Workflow detail | Value |
+          | --- | --- |
+          | Run | [#${RUN_NUMBER}](${RUN_URL}) |
+          | Trigger | ${EVENT_NAME} |
+          | Ref | \`${ref_name}\` |
+          | Commit | [\`${COMMIT_SHA:0:7}\`](${COMMIT_URL}) |
+          | Go | ${GO_VERSION} |
+          | Elapsed | ${elapsed_seconds}s |
+
+          ### Results
+
+          | Check | Result | Duration |
+          | --- | --- | ---: |
+          | Build | ${BUILD_OUTCOME:-not run} | ${BUILD_SECONDS:-—}s |
+          | Tests | ${TEST_OUTCOME:-not run} | ${TEST_SECONDS:-—}s |
+
+          ### Test cases
+
+          | Passed | Failed | Skipped |
+          | ---: | ---: | ---: |
+          | ${TEST_PASSED:-0} | ${TEST_FAILED:-0} | ${TEST_SKIPPED:-0} |
+          EOF
