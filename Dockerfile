@@ -6,7 +6,7 @@ COPY . .
 
 RUN mkdir -p /app/dist && CGO_ENABLED=0 go build -trimpath -ldflags="-w -s" -o /app/dist/fakessh ./src
 
-FROM scratch
+FROM gcr.io/distroless/static-debian13:latest
 
 COPY --from=builder /app/dist/fakessh /fakessh
 

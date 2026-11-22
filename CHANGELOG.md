@@ -18,6 +18,7 @@ Notable changes to this project are documented here. This changelog follows
 
 - Moved the Go application source into `src/`; `make build` now writes the
   executable to `dist/fakessh`.
+- Replaced the scratch runtime image with Distroless Static Debian 13.
 
 ## [0.1.0] - 2026-11-01
 
