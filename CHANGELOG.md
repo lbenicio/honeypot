@@ -9,6 +9,7 @@ Notable changes to this project are documented here. This changelog follows
 
 - A manually triggered GitHub Actions workflow to publish versioned GitHub
   releases and multi-platform Docker images from `CHANGELOG.md`.
+- Weekly Dependabot updates for Go modules, Docker images, and GitHub Actions.
 - GitHub Actions run summaries with workflow results and build, test, and
   release metrics.
 
