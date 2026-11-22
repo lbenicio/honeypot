@@ -57,7 +57,8 @@ jobs:
       failed: ${{ steps.test.outputs.failed }}
       skipped: ${{ steps.test.outputs.skipped }}
       coverage_percent: ${{ steps.test.outputs.coverage_percent }}
-      codecov_outcome: ${{ steps.codecov.outcome }}
+      coverage_available: ${{ steps.test.outputs.coverage_available }}
+      coverage_artifact_outcome: ${{ steps.coverage_artifact.outcome }}
     steps:
       - name: Start job timer
         id: timer
@@ -83,7 +84,9 @@ jobs:
           set -e
 
           coverage_percent="unavailable"
+          coverage_available=false
           if [[ -f coverage.out ]]; then
+            coverage_available=true
             coverage_percent=$(go tool cover -func=coverage.out 2>/dev/null | awk '$1 == "total:" {print $3}' || true)
             coverage_percent="${coverage_percent:-unavailable}"
           fi
@@ -94,23 +97,62 @@ jobs:
             echo "failed=$(grep -c '^--- FAIL:' "$RUNNER_TEMP/go-test.log" || true)"
             echo "skipped=$(grep -c '^--- SKIP:' "$RUNNER_TEMP/go-test.log" || true)"
             echo "coverage_percent=$coverage_percent"
+            echo "coverage_available=$coverage_available"
           } >> "$GITHUB_OUTPUT"
           exit "$status"
 
-      - name: Upload coverage to Codecov
-        id: codecov
+      - name: Upload coverage artifact
+        id: coverage_artifact
         if: always() && hashFiles('coverage.out') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: go-coverage
+          path: coverage.out
+          if-no-files-found: error
+          retention-days: 1
+
+  codecov:
+    name: Upload coverage to Codecov
+    if: always() && needs.test.outputs.coverage_available == 'true'
+    needs: [test]
+    runs-on: ubuntu-latest
+    outputs:
+      started_at: ${{ steps.timer.outputs.started_at }}
+      duration_seconds: ${{ steps.duration.outputs.duration_seconds }}
+      upload_outcome: ${{ steps.codecov_upload.outcome }}
+    steps:
+      - name: Start job timer
+        id: timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: go-coverage
+          path: coverage
+
+      - name: Upload coverage to Codecov
+        id: codecov_upload
         continue-on-error: true
         uses: codecov/codecov-action@v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage.out
+          files: coverage/coverage.out
           fail_ci_if_error: true
+
+      - name: Record Codecov job duration
+        id: duration
+        if: always()
+        env:
+          STARTED_AT: ${{ steps.timer.outputs.started_at }}
+        shell: bash
+        run: echo "duration_seconds=$(($(date +%s) - STARTED_AT))" >> "$GITHUB_OUTPUT"
 
   summary:
     name: Generate summary
     if: always()
-    needs: [build, test]
+    needs: [build, test, codecov]
     runs-on: ubuntu-latest
     steps:
       - name: Write workflow summary
@@ -125,7 +167,11 @@ jobs:
           TEST_FAILED: ${{ needs.test.outputs.failed }}
           TEST_SKIPPED: ${{ needs.test.outputs.skipped }}
           COVERAGE_PERCENT: ${{ needs.test.outputs.coverage_percent }}
-          CODECOV_OUTCOME: ${{ needs.test.outputs.codecov_outcome }}
+          COVERAGE_ARTIFACT_OUTCOME: ${{ needs.test.outputs.coverage_artifact_outcome }}
+          CODECOV_JOB_STATUS: ${{ needs.codecov.result }}
+          CODECOV_STARTED_AT: ${{ needs.codecov.outputs.started_at }}
+          CODECOV_SECONDS: ${{ needs.codecov.outputs.duration_seconds }}
+          CODECOV_UPLOAD_OUTCOME: ${{ needs.codecov.outputs.upload_outcome }}
           GO_VERSION: ${{ needs.build.outputs.go_version }}
           WORKFLOW_NAME: ${{ github.workflow }}
           EVENT_NAME: ${{ github.event_name }}
@@ -137,7 +183,7 @@ jobs:
         shell: bash
         run: |
           started_at=""
-          for value in "$BUILD_STARTED_AT" "$TEST_STARTED_AT"; do
+          for value in "$BUILD_STARTED_AT" "$TEST_STARTED_AT" "$CODECOV_STARTED_AT"; do
             if [[ "$value" =~ ^[0-9]+$ ]] && { [[ -z "$started_at" ]] || ((value < started_at)); }; then
               started_at="$value"
             fi
@@ -164,7 +210,8 @@ jobs:
           | --- | --- | ---: |
           | Build | ${BUILD_STATUS:-not run} | ${BUILD_SECONDS:-—}s |
           | Test | ${TEST_STATUS:-not run} | ${TEST_SECONDS:-—}s |
-          | Codecov upload | ${CODECOV_OUTCOME:-not run} | — |
+          | Coverage artifact | ${COVERAGE_ARTIFACT_OUTCOME:-not run} | — |
+          | Codecov upload | ${CODECOV_UPLOAD_OUTCOME:-${CODECOV_JOB_STATUS:-not run}} | ${CODECOV_SECONDS:-—}s |
 
           ### Test cases
 
