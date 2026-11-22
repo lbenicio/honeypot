@@ -49,17 +49,34 @@ jobs:
         run: |
           started_at=$(date +%s)
           set +e
-          go test -v ./... 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+          go test -coverprofile=coverage.out -covermode=atomic -v ./... 2>&1 | tee "$RUNNER_TEMP/go-test.log"
           status=${PIPESTATUS[0]}
           set -e
+
+          coverage_percent="unavailable"
+          if [[ -f coverage.out ]]; then
+            coverage_percent=$(go tool cover -func=coverage.out 2>/dev/null | awk '$1 == "total:" {print $3}' || true)
+            coverage_percent="${coverage_percent:-unavailable}"
+          fi
 
           {
             echo "duration_seconds=$(($(date +%s) - started_at))"
             echo "passed=$(grep -c '^--- PASS:' "$RUNNER_TEMP/go-test.log" || true)"
             echo "failed=$(grep -c '^--- FAIL:' "$RUNNER_TEMP/go-test.log" || true)"
             echo "skipped=$(grep -c '^--- SKIP:' "$RUNNER_TEMP/go-test.log" || true)"
+            echo "coverage_percent=$coverage_percent"
           } >> "$GITHUB_OUTPUT"
           exit "$status"
+
+      - name: Upload coverage to Codecov
+        id: codecov
+        if: always() && hashFiles('coverage.out') != ''
+        continue-on-error: true
+        uses: codecov/codecov-action@v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.out
+          fail_ci_if_error: true
 
       - name: Write workflow summary
         if: always()
@@ -71,6 +88,8 @@ jobs:
           TEST_PASSED: ${{ steps.test.outputs.passed }}
           TEST_FAILED: ${{ steps.test.outputs.failed }}
           TEST_SKIPPED: ${{ steps.test.outputs.skipped }}
+          COVERAGE_PERCENT: ${{ steps.test.outputs.coverage_percent }}
+          CODECOV_OUTCOME: ${{ steps.codecov.outcome }}
           STARTED_AT: ${{ steps.timer.outputs.started_at }}
           WORKFLOW_NAME: ${{ github.workflow }}
           EVENT_NAME: ${{ github.event_name }}
@@ -104,10 +123,13 @@ jobs:
           | --- | --- | ---: |
           | Build | ${BUILD_OUTCOME:-not run} | ${BUILD_SECONDS:-—}s |
           | Tests | ${TEST_OUTCOME:-not run} | ${TEST_SECONDS:-—}s |
+          | Codecov upload | ${CODECOV_OUTCOME:-not run} | — |
 
           ### Test cases
 
           | Passed | Failed | Skipped |
           | ---: | ---: | ---: |
           | ${TEST_PASSED:-0} | ${TEST_FAILED:-0} | ${TEST_SKIPPED:-0} |
+
+          Coverage: **${COVERAGE_PERCENT:-unavailable}**
           EOF

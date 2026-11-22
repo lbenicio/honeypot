@@ -1,5 +1,8 @@
 # FakeSSH
 
+![License](https://img.shields.io/badge/license-GNU/GPLv3-blue?style=flat&color=green)
+![GitHub Release](https://img.shields.io/github/v/release/lbenicio/honeypot?include_prereleases&sort=semver&display_name=release&style=flat&color=blue)
+
 A dockerized honeypot SSH server written in Go to log login attempts.
 Password authentications always fail so no terminal access is given to the attacker.
 
@@ -39,6 +42,14 @@ Set `PROMETHEUS_ADDR` to change the metrics listener address. When running
 directly on a host, use `127.0.0.1:2112` to restrict access to that host.
 Exported application metrics include SSH connections, active connections,
 password authentication attempts, and SSH connection errors.
+
+### Code coverage
+
+The CI workflow uploads Go coverage reports to Codecov. Configure the
+`CODECOV_TOKEN` repository secret with the upload token for this repository.
+Codecov upload status and total coverage appear in each workflow summary. To
+upload from Dependabot-triggered runs, also add the token under Dependabot
+secrets. Coverage is reported when Go tests produce a `coverage.out` profile.
 
 ### Releases
 
