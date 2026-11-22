@@ -11,10 +11,14 @@ permissions:
 
 jobs:
   build:
-    name: Unit tests
+    name: Build
     runs-on: ubuntu-latest
+    outputs:
+      started_at: ${{ steps.timer.outputs.started_at }}
+      duration_seconds: ${{ steps.build.outputs.duration_seconds }}
+      go_version: ${{ steps.go_version.outputs.version }}
     steps:
-      - name: Start workflow timer
+      - name: Start job timer
         id: timer
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
 
@@ -42,6 +46,31 @@ jobs:
           set -e
           echo "duration_seconds=$(($(date +%s) - started_at))" >> "$GITHUB_OUTPUT"
           exit "$status"
+
+  test:
+    name: Test and upload coverage
+    runs-on: ubuntu-latest
+    outputs:
+      started_at: ${{ steps.timer.outputs.started_at }}
+      duration_seconds: ${{ steps.test.outputs.duration_seconds }}
+      passed: ${{ steps.test.outputs.passed }}
+      failed: ${{ steps.test.outputs.failed }}
+      skipped: ${{ steps.test.outputs.skipped }}
+      coverage_percent: ${{ steps.test.outputs.coverage_percent }}
+      codecov_outcome: ${{ steps.codecov.outcome }}
+    steps:
+      - name: Start job timer
+        id: timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
       - name: Test
         id: test
@@ -78,19 +107,26 @@ jobs:
           files: coverage.out
           fail_ci_if_error: true
 
+  summary:
+    name: Generate summary
+    if: always()
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    steps:
       - name: Write workflow summary
-        if: always()
         env:
-          BUILD_OUTCOME: ${{ steps.build.outcome }}
-          BUILD_SECONDS: ${{ steps.build.outputs.duration_seconds }}
-          TEST_OUTCOME: ${{ steps.test.outcome }}
-          TEST_SECONDS: ${{ steps.test.outputs.duration_seconds }}
-          TEST_PASSED: ${{ steps.test.outputs.passed }}
-          TEST_FAILED: ${{ steps.test.outputs.failed }}
-          TEST_SKIPPED: ${{ steps.test.outputs.skipped }}
-          COVERAGE_PERCENT: ${{ steps.test.outputs.coverage_percent }}
-          CODECOV_OUTCOME: ${{ steps.codecov.outcome }}
-          STARTED_AT: ${{ steps.timer.outputs.started_at }}
+          BUILD_STATUS: ${{ needs.build.result }}
+          BUILD_STARTED_AT: ${{ needs.build.outputs.started_at }}
+          BUILD_SECONDS: ${{ needs.build.outputs.duration_seconds }}
+          TEST_STATUS: ${{ needs.test.result }}
+          TEST_STARTED_AT: ${{ needs.test.outputs.started_at }}
+          TEST_SECONDS: ${{ needs.test.outputs.duration_seconds }}
+          TEST_PASSED: ${{ needs.test.outputs.passed }}
+          TEST_FAILED: ${{ needs.test.outputs.failed }}
+          TEST_SKIPPED: ${{ needs.test.outputs.skipped }}
+          COVERAGE_PERCENT: ${{ needs.test.outputs.coverage_percent }}
+          CODECOV_OUTCOME: ${{ needs.test.outputs.codecov_outcome }}
+          GO_VERSION: ${{ needs.build.outputs.go_version }}
           WORKFLOW_NAME: ${{ github.workflow }}
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
@@ -98,10 +134,15 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
-          GO_VERSION: ${{ steps.go_version.outputs.version }}
         shell: bash
         run: |
-          started_at="${STARTED_AT:-$(date +%s)}"
+          started_at=""
+          for value in "$BUILD_STARTED_AT" "$TEST_STARTED_AT"; do
+            if [[ "$value" =~ ^[0-9]+$ ]] && { [[ -z "$started_at" ]] || ((value < started_at)); }; then
+              started_at="$value"
+            fi
+          done
+          started_at="${started_at:-$(date +%s)}"
           elapsed_seconds=$(($(date +%s) - started_at))
           ref_name="${REF_NAME//|/\\|}"
 
@@ -114,15 +155,15 @@ jobs:
           | Trigger | ${EVENT_NAME} |
           | Ref | \`${ref_name}\` |
           | Commit | [\`${COMMIT_SHA:0:7}\`](${COMMIT_URL}) |
-          | Go | ${GO_VERSION} |
+          | Go | ${GO_VERSION:-not set up} |
           | Elapsed | ${elapsed_seconds}s |
 
           ### Results
 
-          | Check | Result | Duration |
+          | Job | Result | Duration |
           | --- | --- | ---: |
-          | Build | ${BUILD_OUTCOME:-not run} | ${BUILD_SECONDS:-—}s |
-          | Tests | ${TEST_OUTCOME:-not run} | ${TEST_SECONDS:-—}s |
+          | Build | ${BUILD_STATUS:-not run} | ${BUILD_SECONDS:-—}s |
+          | Test | ${TEST_STATUS:-not run} | ${TEST_SECONDS:-—}s |
           | Codecov upload | ${CODECOV_OUTCOME:-not run} | — |
 
           ### Test cases
