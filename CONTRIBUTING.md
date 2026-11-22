@@ -9,13 +9,14 @@ The project uses the Go version declared in `go.mod` and builds with the Go
 toolchain pinned there. Before submitting a change, format Go files and run:
 
 ```sh
-gofmt -w path/to/changed.go
-go build ./...
-go test ./...
+gofmt -w src/*.go
+make build
+make test
 ```
 
 If you change a GitHub Actions workflow, validate it with `actionlint` when
 available. If you change dependencies, update both `go.mod` and `go.sum`.
+The build target writes the executable to `dist/fakessh`.
 
 ## Pull requests
 

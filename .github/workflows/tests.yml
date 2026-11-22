@@ -37,7 +37,7 @@ jobs:
         run: |
           started_at=$(date +%s)
           set +e
-          go build -v ./...
+          make build
           status=$?
           set -e
           echo "duration_seconds=$(($(date +%s) - started_at))" >> "$GITHUB_OUTPUT"

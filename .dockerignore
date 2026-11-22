@@ -1,6 +1,7 @@
 .git/
 .github/
 volumes/
+dist/
 
 .gitignore
 docker-compose.yml

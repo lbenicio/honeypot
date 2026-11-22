@@ -14,6 +14,11 @@ Notable changes to this project are documented here. This changelog follows
 - GitHub Actions run summaries with workflow results and build, test, and
   release metrics.
 
+### Changed
+
+- Moved the Go application source into `src/`; `make build` now writes the
+  executable to `dist/fakessh`.
+
 ## [0.1.0] - 2026-11-01
 
 ### Added
