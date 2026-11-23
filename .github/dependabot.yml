@@ -9,14 +9,15 @@ updates:
       day: monday
       time: "09:00"
       timezone: America/Sao_Paulo
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 25
     commit-message:
-      prefix: "build(deps)"
+      prefix: "build(deps):"
     groups:
       go-non-major:
         patterns:
           - "*"
         update-types:
+          - major
           - minor
           - patch
 
@@ -28,9 +29,9 @@ updates:
       day: monday
       time: "09:00"
       timezone: America/Sao_Paulo
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 25
     commit-message:
-      prefix: "build(deps)"
+      prefix: "build(deps):"
 
   - package-ecosystem: github-actions
     directory: /
@@ -40,13 +41,14 @@ updates:
       day: monday
       time: "09:00"
       timezone: America/Sao_Paulo
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 25
     commit-message:
-      prefix: "build(deps)"
+      prefix: "build(deps):"
     groups:
       actions-non-major:
         patterns:
           - "*"
         update-types:
+          - major
           - minor
           - patch
