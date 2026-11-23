@@ -22,6 +22,9 @@ Notable changes to this project are documented here. This changelog follows
 
 ### Changed
 
+- Split the Go application into domain-focused packages for authentication,
+  health checks, metrics, and SSH serving, with startup and logging at the
+  application layer.
 - Moved the Go application source into `src/`; `make build` now writes the
   executable to `dist/fakessh`.
 - Moved the Dockerfile and Compose configuration into `deployment/`.
