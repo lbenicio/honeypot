@@ -9,6 +9,9 @@ Notable changes to this project are documented here. This changelog follows
 
 - Unit tests for SSH handling, authentication, startup configuration, and
   Prometheus metrics, with a CI coverage requirement above 98%.
+- Docker health checks for the SSH listener.
+- Make targets for linting, formatting, versioned Docker image builds and
+  pushes, and starting or stopping the Docker Compose service.
 - A manually triggered GitHub Actions workflow to publish versioned GitHub
   releases and multi-platform Docker images from `CHANGELOG.md`.
 - Go test coverage uploads to Codecov.
@@ -20,6 +23,7 @@ Notable changes to this project are documented here. This changelog follows
 
 - Moved the Go application source into `src/`; `make build` now writes the
   executable to `dist/fakessh`.
+- Moved the Dockerfile and Compose configuration into `deployment/`.
 - Replaced the scratch runtime image with Distroless Static Debian 13.
 
 ## [0.1.0] - 2026-11-01

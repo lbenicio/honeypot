@@ -12,4 +12,6 @@ COPY --from=builder /app/dist/fakessh /fakessh
 
 EXPOSE 22 2112
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/fakessh", "healthcheck"]
+
 ENTRYPOINT ["/fakessh"]

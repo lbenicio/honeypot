@@ -22,7 +22,7 @@ updates:
           - patch
 
   - package-ecosystem: docker
-    directory: /
+    directory: /deployment
     target-branch: master
     schedule:
       interval: weekly

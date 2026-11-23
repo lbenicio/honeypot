@@ -43,6 +43,28 @@ directly on a host, use `127.0.0.1:2112` to restrict access to that host.
 Exported application metrics include SSH connections, active connections,
 password authentication attempts, and SSH connection errors.
 
+### Docker and Compose
+
+The Dockerfile and Compose configuration are in `deployment/`. The Makefile
+reads the latest dated release heading in `CHANGELOG.md` and tags images with
+that version and `latest`:
+
+```
+make docker-build
+make docker-push
+make docker-up
+make docker-down
+```
+
+Log in to the image registry before running `make docker-push`. The Compose
+service includes a health check for SSH listener readiness.
+
+### Formatting and linting
+
+Install `golangci-lint` to use the project checks. `make lint` checks Go
+formatting and runs static analysis; `make fmt` formats Go files and applies
+available lint fixes.
+
 ### Code coverage
 
 The CI workflow uploads Go coverage reports to Codecov. Configure the

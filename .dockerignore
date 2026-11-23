@@ -1,10 +1,11 @@
 .git/
 .github/
 volumes/
+data/
 dist/
 
 .gitignore
-docker-compose.yml
+deployment/docker-compose.yml
 
 LICENSE.txt
 README.md

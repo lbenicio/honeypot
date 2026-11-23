@@ -1,0 +1,19 @@
+services:
+  fakessh:
+    container_name: fakessh
+    image: fffaraz/fakessh:latest
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "22:22"
+    command: /log
+    volumes:
+      - ../data:/log
+    healthcheck:
+      test: ["CMD", "/fakessh", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

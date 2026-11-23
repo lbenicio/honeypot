@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -21,6 +22,7 @@ import (
 var (
 	errBadPassword = errors.New("permission denied")
 	metricsOnce    sync.Once
+	sshReady       atomic.Bool
 	sshConnections = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "fakessh_ssh_connections_total",
 		Help: "Total number of accepted SSH TCP connections.",
@@ -71,7 +73,25 @@ var runApplication = func(args []string, metricsAddr string) error {
 	return runApplicationWithDependencies(args, metricsAddr, defaultRuntimeDependencies)
 }
 
+var processExit = os.Exit
+var healthCheckClient = &http.Client{Timeout: 2 * time.Second}
+var runHealthCheck = func() error {
+	endpoint, err := healthCheckEndpoint(os.Getenv("PROMETHEUS_ADDR"))
+	if err != nil {
+		return err
+	}
+	return checkHealth(healthCheckClient, endpoint)
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		if err := runHealthCheck(); err != nil {
+			log.Println(err)
+			processExit(1)
+			return
+		}
+		return
+	}
 	if err := runApplication(os.Args[1:], os.Getenv("PROMETHEUS_ADDR")); err != nil {
 		log.Println(err)
 	}
@@ -88,7 +108,11 @@ func runApplicationWithDependencies(args []string, metricsAddr string, deps runt
 		if err != nil {
 			return fmt.Errorf("failed to open log file %q: %w", logPath, err)
 		}
-		defer logFile.Close()
+		defer func() {
+			if err := logFile.Close(); err != nil {
+				log.Printf("Failed to close log file: %v", err)
+			}
+		}()
 		log.SetOutput(logFile)
 	}
 
@@ -105,7 +129,13 @@ func runApplicationWithDependencies(args []string, metricsAddr string, deps runt
 	if err != nil {
 		return fmt.Errorf("failed to listen for SSH connections: %w", err)
 	}
-	defer listener.Close()
+	defer func() {
+		if err := listener.Close(); err != nil {
+			log.Printf("Failed to close SSH listener: %v", err)
+		}
+	}()
+	sshReady.Store(true)
+	defer sshReady.Store(false)
 	serveSSH(listener, serverConfig)
 	return nil
 }
@@ -120,7 +150,39 @@ func metricsHandler() http.Handler {
 	registerMetrics()
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/healthz", healthHandler)
 	return mux
+}
+
+func healthHandler(w http.ResponseWriter, _ *http.Request) {
+	if !sshReady.Load() {
+		http.Error(w, "SSH listener is not ready", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func checkHealth(client *http.Client, endpoint string) error {
+	response, err := client.Get(endpoint)
+	if err != nil {
+		return fmt.Errorf("healthcheck request failed: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("healthcheck returned HTTP %d", response.StatusCode)
+	}
+	return nil
+}
+
+func healthCheckEndpoint(metricsAddr string) (string, error) {
+	if metricsAddr == "" {
+		metricsAddr = ":2112"
+	}
+	_, port, err := net.SplitHostPort(metricsAddr)
+	if err != nil || port == "" {
+		return "", fmt.Errorf("invalid Prometheus address %q", metricsAddr)
+	}
+	return "http://127.0.0.1:" + port + "/healthz", nil
 }
 
 func startMetricsServer(addr string, serve func(string, http.Handler) error, fatalf func(string, ...any)) {
@@ -201,7 +263,7 @@ func handleConn(conn net.Conn, serverConfig *ssh.ServerConfig) {
 }
 
 func handleConnWithHandshake(conn net.Conn, handshake func(net.Conn) error) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	defer activeConnections.Dec()
 	log.Println(conn.RemoteAddr())
 	if err := handshake(conn); err != nil {

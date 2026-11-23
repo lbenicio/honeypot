@@ -76,6 +76,48 @@ func TestRunApplicationUsesDefaultDependencies(t *testing.T) {
 	}
 }
 
+func TestMainHealthCheckMode(t *testing.T) {
+	oldArgs := os.Args
+	oldRun := runHealthCheck
+	oldExit := processExit
+	oldOutput := log.Writer()
+	t.Cleanup(func() {
+		os.Args = oldArgs
+		runHealthCheck = oldRun
+		processExit = oldExit
+		log.SetOutput(oldOutput)
+	})
+	os.Args = []string{"fakessh", "healthcheck"}
+	log.SetOutput(io.Discard)
+
+	called := false
+	exitCode := 0
+	runHealthCheck = func() error {
+		called = true
+		return nil
+	}
+	processExit = func(code int) { exitCode = code }
+	main()
+	if !called {
+		t.Fatal("healthcheck mode did not run the health check")
+	}
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d after successful health check, want no exit", exitCode)
+	}
+
+	wantErr := errors.New("health endpoint unavailable")
+	var output bytes.Buffer
+	log.SetOutput(&output)
+	runHealthCheck = func() error { return wantErr }
+	main()
+	if exitCode != 1 {
+		t.Errorf("exit code = %d after failed health check, want 1", exitCode)
+	}
+	if !strings.Contains(output.String(), wantErr.Error()) {
+		t.Errorf("health check error was not logged: %q", output.String())
+	}
+}
+
 func TestRunApplicationWithDependencies(t *testing.T) {
 	oldOutput := log.Writer()
 	oldFlags := log.Flags()
@@ -129,7 +171,7 @@ func TestRunApplicationWithDependencies(t *testing.T) {
 		if err := runApplicationWithDependencies([]string{logDir}, "", deps); err != nil {
 			t.Fatalf("runApplicationWithDependencies() error = %v", err)
 		}
-		clientConn.Close()
+		_ = clientConn.Close()
 		select {
 		case <-notifiedConn.closed:
 		case <-time.After(time.Second):
@@ -181,6 +223,39 @@ func TestRunApplicationWithDependencies(t *testing.T) {
 		err := runApplicationWithDependencies([]string{"/logs"}, ":2112", deps)
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("error = %v, want wrapped %v", err, wantErr)
+		}
+	})
+
+	t.Run("logs log file close error", func(t *testing.T) {
+		deps := testRuntimeDependencies()
+		deps.openFile = func(name string, flag int, perm os.FileMode) (*os.File, error) {
+			file, err := os.OpenFile(name, flag, perm)
+			if err != nil {
+				return nil, err
+			}
+			_ = file.Close()
+			return file, nil
+		}
+		wantErr := errors.New("stop after log setup")
+		deps.newServerConfig = func() (*ssh.ServerConfig, error) { return nil, wantErr }
+		err := runApplicationWithDependencies([]string{t.TempDir()}, ":2112", deps)
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("error = %v, want wrapped %v", err, wantErr)
+		}
+	})
+
+	t.Run("logs listener close error", func(t *testing.T) {
+		deps := testRuntimeDependencies()
+		listener := &stubListener{
+			acceptErr: errors.New("stop accepting"),
+			closeErr:  errors.New("close failed"),
+		}
+		deps.listen = func(string, string) (net.Listener, error) { return listener, nil }
+		if err := runApplicationWithDependencies(nil, ":2112", deps); err != nil {
+			t.Fatalf("runApplicationWithDependencies() error = %v, want nil", err)
+		}
+		if !listener.closed {
+			t.Error("SSH listener was not closed")
 		}
 	})
 }
@@ -295,7 +370,7 @@ func TestHandleConnCountsErrorsAndClosesConnection(t *testing.T) {
 	notifiedConn := &closeNotifyConn{Conn: serverConn, closed: make(chan struct{})}
 	activeConnections.Inc()
 	go handleConn(notifiedConn, &ssh.ServerConfig{})
-	clientConn.Close()
+	_ = clientConn.Close()
 	select {
 	case <-notifiedConn.closed:
 	case <-time.After(time.Second):
@@ -324,7 +399,7 @@ func TestHandleConnSuccessfulHandshakeResultDoesNotCountError(t *testing.T) {
 		handleConnWithHandshake(notifiedConn, func(net.Conn) error { return nil })
 		close(done)
 	}()
-	defer clientConn.Close()
+	defer func() { _ = clientConn.Close() }()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
@@ -353,6 +428,115 @@ func TestMetricsHandlerExportsPrometheusMetrics(t *testing.T) {
 		if !strings.Contains(recorder.Body.String(), name) {
 			t.Errorf("metrics response does not contain %q", name)
 		}
+	}
+}
+
+func TestHealthHandlerReflectsSSHReadiness(t *testing.T) {
+	wasReady := sshReady.Load()
+	t.Cleanup(func() { sshReady.Store(wasReady) })
+	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	recorder := httptest.NewRecorder()
+	sshReady.Store(false)
+	healthHandler(recorder, request)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Errorf("not-ready status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
+	}
+
+	recorder = httptest.NewRecorder()
+	sshReady.Store(true)
+	healthHandler(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Errorf("ready status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+}
+
+func TestCheckHealth(t *testing.T) {
+	transportError := errors.New("connection refused")
+	tests := []struct {
+		name       string
+		statusCode int
+		err        error
+		wantErr    error
+	}{
+		{name: "healthy response", statusCode: http.StatusOK},
+		{name: "unhealthy response", statusCode: http.StatusServiceUnavailable, wantErr: errors.New("healthcheck returned HTTP 503")},
+		{name: "transport error", err: transportError, wantErr: transportError},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.URL.String() != "http://health.test/healthz" {
+					t.Errorf("request URL = %q, want http://health.test/healthz", request.URL)
+				}
+				if test.err != nil {
+					return nil, test.err
+				}
+				return &http.Response{
+					StatusCode: test.statusCode,
+					Body:       io.NopCloser(strings.NewReader("")),
+					Header:     make(http.Header),
+					Request:    request,
+				}, nil
+			})}
+			err := checkHealth(client, "http://health.test/healthz")
+			if test.wantErr == nil && err != nil {
+				t.Fatalf("checkHealth() error = %v, want nil", err)
+			}
+			if test.wantErr != nil && (err == nil || !strings.Contains(err.Error(), test.wantErr.Error())) {
+				t.Fatalf("checkHealth() error = %v, want %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestRunHealthCheckUsesHealthEndpoint(t *testing.T) {
+	oldClient := healthCheckClient
+	t.Cleanup(func() { healthCheckClient = oldClient })
+	t.Setenv("PROMETHEUS_ADDR", "")
+	healthCheckClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.String() != "http://127.0.0.1:2112/healthz" {
+			t.Errorf("healthcheck URL = %q, want http://127.0.0.1:2112/healthz", request.URL)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("")),
+			Header:     make(http.Header),
+			Request:    request,
+		}, nil
+	})}
+	if err := runHealthCheck(); err != nil {
+		t.Fatalf("runHealthCheck() error = %v, want nil", err)
+	}
+}
+
+func TestHealthCheckEndpoint(t *testing.T) {
+	tests := []struct {
+		name        string
+		metricsAddr string
+		want        string
+		wantErr     bool
+	}{
+		{name: "default address", want: "http://127.0.0.1:2112/healthz"},
+		{name: "custom address", metricsAddr: "0.0.0.0:9211", want: "http://127.0.0.1:9211/healthz"},
+		{name: "malformed address", metricsAddr: "invalid", wantErr: true},
+		{name: "missing port", metricsAddr: ":", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := healthCheckEndpoint(test.metricsAddr)
+			if test.wantErr {
+				if err == nil {
+					t.Fatal("healthCheckEndpoint() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("healthCheckEndpoint() error = %v", err)
+			}
+			if got != test.want {
+				t.Errorf("healthCheckEndpoint() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
@@ -403,8 +587,15 @@ type stubListener struct {
 	conn      net.Conn
 	returned  bool
 	acceptErr error
+	closeErr  error
 	closeOnce sync.Once
 	closed    bool
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
 }
 
 func (l *stubListener) Accept() (net.Conn, error) {
@@ -417,7 +608,7 @@ func (l *stubListener) Accept() (net.Conn, error) {
 
 func (l *stubListener) Close() error {
 	l.closeOnce.Do(func() { l.closed = true })
-	return nil
+	return l.closeErr
 }
 
 func (l *stubListener) Addr() net.Addr { return stubAddr("listener") }
