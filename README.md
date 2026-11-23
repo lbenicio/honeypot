@@ -12,7 +12,8 @@ Password authentications always fail so no terminal access is given to the attac
 ```
 make build
 sudo setcap 'cap_net_bind_service=+ep' ./dist/fakessh
-./dist/fakessh [optional-log-directory]
+./dist/fakessh --help
+./dist/fakessh --metrics 127.0.0.1:2112 --log-file ./fakessh.log
 ```
 
 OR
@@ -37,8 +38,11 @@ For Docker, publish both ports to scrape metrics from outside the container:
 docker run -d --restart=always -p 22:22 -p 2112:2112 --name fakessh lbenicio/fakessh
 ```
 
-Set `PROMETHEUS_ADDR` to change the metrics listener address. When running
-directly on a host, use `127.0.0.1:2112` to restrict access to that host.
+Use `--metrics 127.0.0.1:2112` or set `PROMETHEUS_ADDR` to change the metrics
+listener address. The command-line flag takes precedence. When running directly
+on a host, use `127.0.0.1:2112` to restrict access to that host. Use
+`--log-file ./fakessh.log` to write logs to a specific file; by default logs go
+to stderr. Run `./dist/fakessh --help` for usage, flags, and operating messages.
 Exported application metrics include SSH connections, active connections,
 password authentication attempts, and SSH connection errors.
 

@@ -27,16 +27,16 @@ func TestRunApplicationUsesDefaultDependencies(t *testing.T) {
 		return nil, wantErr
 	}
 
-	err := runApplication(nil, ":0")
+	err := runApplication(":0", "")
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want wrapped %v", err, wantErr)
 	}
 }
 
 func TestRunApplicationWithDependencies(t *testing.T) {
-	t.Run("defaults metrics address and configures logging", func(t *testing.T) {
+	t.Run("defaults metrics address and writes to the configured log file", func(t *testing.T) {
 		logDir := t.TempDir()
-		fixedTime := time.Date(2026, time.November, 22, 12, 34, 56, 789000000, time.UTC)
+		logFile := filepath.Join(logDir, "fakessh.log")
 		serverConn, clientConn := net.Pipe()
 		notifiedConn := &closeNotifyConn{Conn: serverConn, closed: make(chan struct{})}
 		listener := &stubListener{conn: notifiedConn, acceptErr: errors.New("listener stopped")}
@@ -45,11 +45,9 @@ func TestRunApplicationWithDependencies(t *testing.T) {
 			body string
 		}, 1)
 		deps := testRuntimeDependencies()
-		deps.now = func() time.Time { return fixedTime }
 		deps.openFile = func(name string, flag int, perm os.FileMode) (*os.File, error) {
-			want := filepath.Join(logDir, "fakessh-2026-11-22-12-34-56-000.log")
-			if name != want {
-				t.Errorf("log file path = %q, want %q", name, want)
+			if name != logFile {
+				t.Errorf("log file path = %q, want %q", name, logFile)
 			}
 			return os.OpenFile(name, flag, perm)
 		}
@@ -75,7 +73,7 @@ func TestRunApplicationWithDependencies(t *testing.T) {
 			return nil
 		}
 
-		if err := runApplicationWithDependencies([]string{logDir}, "", deps); err != nil {
+		if err := runApplicationWithDependencies("", logFile, deps); err != nil {
 			t.Fatalf("runApplicationWithDependencies() error = %v", err)
 		}
 		_ = clientConn.Close()
@@ -95,7 +93,7 @@ func TestRunApplicationWithDependencies(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("metrics server was not started")
 		}
-		if _, err := os.Stat(filepath.Join(logDir, "fakessh-2026-11-22-12-34-56-000.log")); err != nil {
+		if _, err := os.Stat(logFile); err != nil {
 			t.Errorf("log file was not created: %v", err)
 		}
 		if !listener.closed {
@@ -112,7 +110,7 @@ func TestRunApplicationWithDependencies(t *testing.T) {
 			metricsAddress <- addr
 			return nil
 		}
-		err := runApplicationWithDependencies(nil, "127.0.0.1:9211", deps)
+		err := runApplicationWithDependencies("127.0.0.1:9211", "", deps)
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("error = %v, want wrapped %v", err, wantErr)
 		}
@@ -130,7 +128,7 @@ func TestRunApplicationWithDependencies(t *testing.T) {
 		wantErr := errors.New("port unavailable")
 		deps := testRuntimeDependencies()
 		deps.listen = func(string, string) (net.Listener, error) { return nil, wantErr }
-		err := runApplicationWithDependencies(nil, ":2112", deps)
+		err := runApplicationWithDependencies(":2112", "", deps)
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("error = %v, want wrapped %v", err, wantErr)
 		}
@@ -140,7 +138,7 @@ func TestRunApplicationWithDependencies(t *testing.T) {
 		wantErr := errors.New("disk unavailable")
 		deps := testRuntimeDependencies()
 		deps.openFile = func(string, int, os.FileMode) (*os.File, error) { return nil, wantErr }
-		err := runApplicationWithDependencies([]string{"/logs"}, ":2112", deps)
+		err := runApplicationWithDependencies(":2112", "/logs/fakessh.log", deps)
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("error = %v, want wrapped %v", err, wantErr)
 		}
@@ -158,7 +156,7 @@ func TestRunApplicationWithDependencies(t *testing.T) {
 		}
 		wantErr := errors.New("stop after log setup")
 		deps.newServerConfig = func(auth.PasswordCallback) (*ssh.ServerConfig, error) { return nil, wantErr }
-		err := runApplicationWithDependencies([]string{t.TempDir()}, ":2112", deps)
+		err := runApplicationWithDependencies(":2112", filepath.Join(t.TempDir(), "fakessh.log"), deps)
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("error = %v, want wrapped %v", err, wantErr)
 		}
@@ -168,7 +166,7 @@ func TestRunApplicationWithDependencies(t *testing.T) {
 		deps := testRuntimeDependencies()
 		listener := &stubListener{acceptErr: errors.New("stop accepting"), closeErr: errors.New("close failed")}
 		deps.listen = func(string, string) (net.Listener, error) { return listener, nil }
-		if err := runApplicationWithDependencies(nil, ":2112", deps); err != nil {
+		if err := runApplicationWithDependencies(":2112", "", deps); err != nil {
 			t.Fatalf("runApplicationWithDependencies() error = %v, want nil", err)
 		}
 		if !listener.closed {
@@ -200,7 +198,6 @@ func TestStartMetricsServerReportsErrors(t *testing.T) {
 
 func testRuntimeDependencies() runtimeDependencies {
 	return runtimeDependencies{
-		now:       time.Now,
 		newLogger: testLogger,
 		openFile:  os.OpenFile,
 		listen: func(string, string) (net.Listener, error) {

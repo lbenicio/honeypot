@@ -15,7 +15,6 @@ import (
 )
 
 type runtimeDependencies struct {
-	now             func() time.Time
 	newLogger       func() *log.Logger
 	openFile        func(string, int, os.FileMode) (*os.File, error)
 	listen          func(string, string) (net.Listener, error)
@@ -25,7 +24,6 @@ type runtimeDependencies struct {
 }
 
 var defaultRuntimeDependencies = runtimeDependencies{
-	now:             time.Now,
 	newLogger:       func() *log.Logger { return log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds) },
 	openFile:        os.OpenFile,
 	listen:          net.Listen,
@@ -34,28 +32,27 @@ var defaultRuntimeDependencies = runtimeDependencies{
 	fatalf:          log.Fatalf,
 }
 
-var runApplication = func(args []string, metricsAddr string) error {
-	return runApplicationWithDependencies(args, metricsAddr, defaultRuntimeDependencies)
+var runApplication = func(metricsAddr, logFile string) error {
+	return runApplicationWithDependencies(metricsAddr, logFile, defaultRuntimeDependencies)
 }
 
-func runApplicationWithDependencies(args []string, metricsAddr string, deps runtimeDependencies) error {
+func runApplicationWithDependencies(metricsAddr, logFile string, deps runtimeDependencies) error {
 	if metricsAddr == "" {
-		metricsAddr = ":2112"
+		metricsAddr = defaultMetricsAddress
 	}
 
 	logger := deps.newLogger()
-	if len(args) > 0 {
-		logPath := logFilePath(args[0], deps.now())
-		logFile, err := deps.openFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if logFile != "" {
+		file, err := deps.openFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
-			return fmt.Errorf("failed to open log file %q: %w", logPath, err)
+			return fmt.Errorf("failed to open log file %q: %w", logFile, err)
 		}
 		defer func() {
-			if err := logFile.Close(); err != nil {
+			if err := file.Close(); err != nil {
 				logger.Printf("Failed to close log file: %v", err)
 			}
 		}()
-		logger.SetOutput(logFile)
+		logger.SetOutput(file)
 	}
 
 	appMetrics := metrics.New()
