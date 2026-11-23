@@ -7,6 +7,8 @@ Notable changes to this project are documented here. This changelog follows
 
 ### Added
 
+- Unit tests for SSH handling, authentication, startup configuration, and
+  Prometheus metrics, with a CI coverage requirement above 98%.
 - A manually triggered GitHub Actions workflow to publish versioned GitHub
   releases and multi-platform Docker images from `CHANGELOG.md`.
 - Go test coverage uploads to Codecov.

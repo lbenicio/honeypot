@@ -91,6 +91,13 @@ jobs:
             coverage_percent="${coverage_percent:-unavailable}"
           fi
 
+          if [[ "$status" -eq 0 ]]; then
+            if ! awk '/coverage: [0-9.]+% of statements/ { found = 1; for (field = 1; field <= NF; field++) if ($field == "coverage:") { coverage = $(field + 1); sub(/%$/, "", coverage); if ((coverage + 0) <= 98) { printf "Package coverage is %s%%; it must be greater than 98%%.\n", coverage > "/dev/stderr"; failed = 1 } } } END { if (!found || failed) exit 1 }' "$RUNNER_TEMP/go-test.log"; then
+              echo "Every Go package must report more than 98% statement coverage." >&2
+              status=1
+            fi
+          fi
+
           {
             echo "duration_seconds=$(($(date +%s) - started_at))"
             echo "passed=$(grep -c '^--- PASS:' "$RUNNER_TEMP/go-test.log" || true)"

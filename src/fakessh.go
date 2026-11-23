@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -18,6 +20,7 @@ import (
 
 var (
 	errBadPassword = errors.New("permission denied")
+	metricsOnce    sync.Once
 	sshConnections = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "fakessh_ssh_connections_total",
 		Help: "Total number of accepted SSH TCP connections.",
@@ -46,57 +49,134 @@ var (
 	}
 )
 
-func main() {
-	prometheus.MustRegister(sshConnections, activeConnections, sshConnectionErrors, passwordAttempts)
+type runtimeDependencies struct {
+	now             func() time.Time
+	openFile        func(string, int, os.FileMode) (*os.File, error)
+	listen          func(string, string) (net.Listener, error)
+	newServerConfig func() (*ssh.ServerConfig, error)
+	serveMetrics    func(string, http.Handler) error
+	fatalf          func(string, ...any)
+}
 
-	if len(os.Args) > 1 {
-		logPath := fmt.Sprintf("%s/fakessh-%s.log", os.Args[1], time.Now().Format("2006-01-02-15-04-05-000"))
-		logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+var defaultRuntimeDependencies = runtimeDependencies{
+	now:             time.Now,
+	openFile:        os.OpenFile,
+	listen:          net.Listen,
+	newServerConfig: newSSHServerConfig,
+	serveMetrics:    http.ListenAndServe,
+	fatalf:          log.Fatalf,
+}
+
+var runApplication = func(args []string, metricsAddr string) error {
+	return runApplicationWithDependencies(args, metricsAddr, defaultRuntimeDependencies)
+}
+
+func main() {
+	if err := runApplication(os.Args[1:], os.Getenv("PROMETHEUS_ADDR")); err != nil {
+		log.Println(err)
+	}
+}
+
+func runApplicationWithDependencies(args []string, metricsAddr string, deps runtimeDependencies) error {
+	if metricsAddr == "" {
+		metricsAddr = ":2112"
+	}
+
+	if len(args) > 0 {
+		logPath := fmt.Sprintf("%s/fakessh-%s.log", args[0], deps.now().Format("2006-01-02-15-04-05-000"))
+		logFile, err := deps.openFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
-			log.Println("Failed to open log file:", logPath, err)
-			return
+			return fmt.Errorf("failed to open log file %q: %w", logPath, err)
 		}
 		defer logFile.Close()
 		log.SetOutput(logFile)
 	}
 
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	registerMetrics()
+	startMetricsServer(metricsAddr, deps.serveMetrics, deps.fatalf)
 
-	metricsAddr := os.Getenv("PROMETHEUS_ADDR")
-	if metricsAddr == "" {
-		metricsAddr = ":2112"
+	serverConfig, err := deps.newServerConfig()
+	if err != nil {
+		return fmt.Errorf("create SSH server configuration: %w", err)
 	}
+
+	listener, err := deps.listen("tcp", ":22")
+	if err != nil {
+		return fmt.Errorf("failed to listen for SSH connections: %w", err)
+	}
+	defer listener.Close()
+	serveSSH(listener, serverConfig)
+	return nil
+}
+
+func registerMetrics() {
+	metricsOnce.Do(func() {
+		prometheus.MustRegister(sshConnections, activeConnections, sshConnectionErrors, passwordAttempts)
+	})
+}
+
+func metricsHandler() http.Handler {
+	registerMetrics()
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	return mux
+}
+
+func startMetricsServer(addr string, serve func(string, http.Handler) error, fatalf func(string, ...any)) {
+	handler := metricsHandler()
 	go func() {
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.Handler())
-		log.Printf("Serving Prometheus metrics on %s/metrics", metricsAddr)
-		if err := http.ListenAndServe(metricsAddr, mux); err != nil {
-			log.Fatal("Failed to serve Prometheus metrics:", err)
+		log.Printf("Serving Prometheus metrics on %s/metrics", addr)
+		if err := serve(addr, handler); err != nil {
+			fatalf("Failed to serve Prometheus metrics: %v", err)
 		}
 	}()
+}
 
+func newSSHServerConfig() (*ssh.ServerConfig, error) {
+	return newSSHServerConfigWithSigner(newSSHHostSigner)
+}
+
+func newSSHServerConfigWithSigner(createSigner func() (ssh.Signer, error)) (*ssh.ServerConfig, error) {
+	signer, err := createSigner()
+	if err != nil {
+		return nil, fmt.Errorf("create SSH server host key: %w", err)
+	}
 	serverConfig := &ssh.ServerConfig{
 		MaxAuthTries:     6,
 		PasswordCallback: passwordCallback,
 		ServerVersion:    serverVersions[0],
 	}
 
-	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	signer, _ := ssh.NewSignerFromSigner(privateKey)
 	serverConfig.AddHostKey(signer)
+	return serverConfig, nil
+}
 
-	listener, err := net.Listen("tcp", ":22")
+func newSSHHostSigner() (ssh.Signer, error) {
+	return newSSHHostSignerWithFunctions(
+		func() (crypto.Signer, error) { return rsa.GenerateKey(rand.Reader, 2048) },
+		ssh.NewSignerFromSigner,
+	)
+}
+
+func newSSHHostSignerWithFunctions(generateKey func() (crypto.Signer, error), makeSigner func(crypto.Signer) (ssh.Signer, error)) (ssh.Signer, error) {
+	privateKey, err := generateKey()
 	if err != nil {
-		log.Println("Failed to listen:", err)
-		return
+		return nil, fmt.Errorf("generate SSH host key: %w", err)
 	}
-	defer listener.Close()
+	signer, err := makeSigner(privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("create SSH host key signer: %w", err)
+	}
+	return signer, nil
+}
 
+func serveSSH(listener net.Listener, serverConfig *ssh.ServerConfig) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Println("Failed to accept:", err)
-			break
+			return
 		}
 		sshConnections.Inc()
 		activeConnections.Inc()
@@ -104,18 +184,27 @@ func main() {
 	}
 }
 
+var passwordCallbackDelay = 100 * time.Millisecond
+
 func passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 	passwordAttempts.Inc()
 	log.Println(conn.RemoteAddr(), string(conn.ClientVersion()), conn.User(), string(password))
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(passwordCallbackDelay)
 	return nil, errBadPassword
 }
 
 func handleConn(conn net.Conn, serverConfig *ssh.ServerConfig) {
+	handleConnWithHandshake(conn, func(conn net.Conn) error {
+		_, _, _, err := ssh.NewServerConn(conn, serverConfig)
+		return err
+	})
+}
+
+func handleConnWithHandshake(conn net.Conn, handshake func(net.Conn) error) {
 	defer conn.Close()
 	defer activeConnections.Dec()
 	log.Println(conn.RemoteAddr())
-	if _, _, _, err := ssh.NewServerConn(conn, serverConfig); err != nil {
+	if err := handshake(conn); err != nil {
 		sshConnectionErrors.Inc()
 	}
 }
