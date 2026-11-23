@@ -10,6 +10,7 @@ Notable changes to this project are documented here. This changelog follows
 - Unit tests for SSH handling, authentication, startup configuration, and
   Prometheus metrics, with a CI coverage requirement above 98%.
 - Docker health checks for the SSH listener.
+- Formatting and golangci-lint checks in the unit-test workflow.
 - Make targets for linting, formatting, versioned Docker image builds and
   pushes, and starting or stopping the Docker Compose service.
 - A manually triggered GitHub Actions workflow to publish versioned GitHub

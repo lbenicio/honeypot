@@ -1,12 +1,13 @@
 # FakeSSH
 
 ![License](https://img.shields.io/badge/license-GNU/GPLv3-blue?style=flat&color=green)
+![Codecov](https://codecov.io/github/lbenicio/honeypot/graph/badge.svg)
 ![GitHub Release](https://img.shields.io/github/v/release/lbenicio/honeypot?include_prereleases&sort=semver&display_name=release&style=flat&color=blue)
 
 A dockerized honeypot SSH server written in Go to log login attempts.
 Password authentications always fail so no terminal access is given to the attacker.
 
-[![](http://dockeri.co/image/fffaraz/fakessh)](https://hub.docker.com/r/fffaraz/fakessh)
+[![](https://hub.docker.com/lbenicio/fakessh)](https://hub.docker.com/lbenicio/fakessh)
 
 ## Quick Start
 
@@ -61,9 +62,9 @@ service includes a health check for SSH listener readiness.
 
 ### Formatting and linting
 
-Install `golangci-lint` to use the project checks. `make lint` checks Go
-formatting and runs static analysis; `make fmt` formats Go files and applies
-available lint fixes.
+Install `golangci-lint` v2.15.0 to use the project checks. `make lint` checks
+Go formatting and runs static analysis; `make fmt` formats Go files and
+applies available lint fixes. The unit-test workflow runs `make lint`.
 
 ### Code coverage
 

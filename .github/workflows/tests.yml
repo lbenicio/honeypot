@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Build
+    name: Build binary
     runs-on: ubuntu-latest
     outputs:
       started_at: ${{ steps.timer.outputs.started_at }}
@@ -47,8 +47,47 @@ jobs:
           echo "duration_seconds=$(($(date +%s) - started_at))" >> "$GITHUB_OUTPUT"
           exit "$status"
 
+  lint:
+    name: Format and lint
+    runs-on: ubuntu-latest
+    outputs:
+      started_at: ${{ steps.timer.outputs.started_at }}
+      duration_seconds: ${{ steps.lint.outputs.duration_seconds }}
+    steps:
+      - name: Start job timer
+        id: timer
+        run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Install golangci-lint
+        env:
+          GOLANGCI_LINT_VERSION: v2.15.0
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@"$GOLANGCI_LINT_VERSION"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Check formatting and lint
+        id: lint
+        shell: bash
+        run: |
+          started_at=$(date +%s)
+          set +e
+          make lint
+          status=$?
+          set -e
+          echo "duration_seconds=$(($(date +%s) - started_at))" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
   test:
-    name: Test and upload coverage
+    name: Test and collect coverage
     runs-on: ubuntu-latest
     outputs:
       started_at: ${{ steps.timer.outputs.started_at }}
@@ -120,7 +159,7 @@ jobs:
           retention-days: 1
 
   codecov:
-    name: Upload coverage to Codecov
+    name: Publish coverage to Codecov
     if: always() && needs.test.outputs.coverage_available == 'true'
     needs: [test]
     runs-on: ubuntu-latest
@@ -157,9 +196,9 @@ jobs:
         run: echo "duration_seconds=$(($(date +%s) - STARTED_AT))" >> "$GITHUB_OUTPUT"
 
   summary:
-    name: Generate summary
+    name: Workflow summary
     if: always()
-    needs: [build, test, codecov]
+    needs: [build, lint, test, codecov]
     runs-on: ubuntu-latest
     steps:
       - name: Write workflow summary
@@ -167,6 +206,9 @@ jobs:
           BUILD_STATUS: ${{ needs.build.result }}
           BUILD_STARTED_AT: ${{ needs.build.outputs.started_at }}
           BUILD_SECONDS: ${{ needs.build.outputs.duration_seconds }}
+          LINT_STATUS: ${{ needs.lint.result }}
+          LINT_STARTED_AT: ${{ needs.lint.outputs.started_at }}
+          LINT_SECONDS: ${{ needs.lint.outputs.duration_seconds }}
           TEST_STATUS: ${{ needs.test.result }}
           TEST_STARTED_AT: ${{ needs.test.outputs.started_at }}
           TEST_SECONDS: ${{ needs.test.outputs.duration_seconds }}
@@ -190,7 +232,7 @@ jobs:
         shell: bash
         run: |
           started_at=""
-          for value in "$BUILD_STARTED_AT" "$TEST_STARTED_AT" "$CODECOV_STARTED_AT"; do
+          for value in "$BUILD_STARTED_AT" "$LINT_STARTED_AT" "$TEST_STARTED_AT" "$CODECOV_STARTED_AT"; do
             if [[ "$value" =~ ^[0-9]+$ ]] && { [[ -z "$started_at" ]] || ((value < started_at)); }; then
               started_at="$value"
             fi
@@ -215,10 +257,11 @@ jobs:
 
           | Job | Result | Duration |
           | --- | --- | ---: |
-          | Build | ${BUILD_STATUS:-not run} | ${BUILD_SECONDS:-—}s |
-          | Test | ${TEST_STATUS:-not run} | ${TEST_SECONDS:-—}s |
+          | Build binary | ${BUILD_STATUS:-not run} | ${BUILD_SECONDS:-—}s |
+          | Format and lint | ${LINT_STATUS:-not run} | ${LINT_SECONDS:-—}s |
+          | Test and collect coverage | ${TEST_STATUS:-not run} | ${TEST_SECONDS:-—}s |
           | Coverage artifact | ${COVERAGE_ARTIFACT_OUTCOME:-not run} | — |
-          | Codecov upload | ${CODECOV_UPLOAD_OUTCOME:-${CODECOV_JOB_STATUS:-not run}} | ${CODECOV_SECONDS:-—}s |
+          | Publish coverage to Codecov | ${CODECOV_UPLOAD_OUTCOME:-${CODECOV_JOB_STATUS:-not run}} | ${CODECOV_SECONDS:-—}s |
 
           ### Test cases
 
