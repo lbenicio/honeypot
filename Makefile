@@ -9,7 +9,7 @@ VERSION ?= $(shell grep -E '\[[0-9]+\.[0-9]+\.[0-9]+.*\] - [0-9]{4}-[0-9]{2}-[0-
 
 .PHONY: all help build test clean fmt lint docker-build docker-push docker-up docker-down
 
-all: test build ## Build the application.
+all: test build ## Tetst and build the application.
 
 help: ## Show available targets.
 	@awk 'BEGIN { FS = ":.*## " } /^[a-zA-Z0-9_-]+:.*## / { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
