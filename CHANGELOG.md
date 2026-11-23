@@ -7,8 +7,8 @@ Notable changes to this project are documented here. This changelog follows
 
 ### Added
 
-- Command-line help, a Prometheus metrics listener flag, and a configurable
-  log file path.
+- Command-line help, short and long Prometheus metrics and log-file flags, and
+  a configurable log file path.
 - Unit tests for SSH handling, authentication, startup configuration, and
   Prometheus metrics, with a CI coverage requirement above 98%.
 - Docker health checks for the SSH listener.

@@ -46,6 +46,20 @@ func TestParseCLIOptions(t *testing.T) {
 		}
 	})
 
+	t.Run("parses short flag aliases", func(t *testing.T) {
+		var output, errorOutput bytes.Buffer
+		got, help, err := parseCLIOptions([]string{"-m", "127.0.0.1:9211", "-l", "/var/log/fakessh.log"}, "", &output, &errorOutput)
+		if err != nil {
+			t.Fatalf("parseCLIOptions() error = %v", err)
+		}
+		if help {
+			t.Fatal("help requested when parsing short configuration flags")
+		}
+		if got.metricsAddr != "127.0.0.1:9211" || got.logFile != "/var/log/fakessh.log" {
+			t.Errorf("options = %+v, want configured metrics and log file", got)
+		}
+	})
+
 	t.Run("prints complete help", func(t *testing.T) {
 		var output, errorOutput bytes.Buffer
 		_, help, err := parseCLIOptions([]string{"-h"}, "", &output, &errorOutput)
@@ -55,7 +69,7 @@ func TestParseCLIOptions(t *testing.T) {
 		if !help {
 			t.Fatal("help was not reported")
 		}
-		for _, want := range []string{"Usage:", "--metrics", "--log-file", "healthcheck", "Prometheus metrics", "Logs go to stderr"} {
+		for _, want := range []string{"Usage:", "-m, --metrics", "-l, --log-file", "healthcheck", "Prometheus metrics", "Logs go to stderr"} {
 			if !strings.Contains(output.String(), want) {
 				t.Errorf("help output is missing %q: %q", want, output.String())
 			}

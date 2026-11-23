@@ -197,7 +197,7 @@ func TestMainHelpAndInvalidFlags(t *testing.T) {
 
 	os.Args = []string{"fakessh", "--help"}
 	main()
-	for _, want := range []string{"Usage:", "--metrics", "--log-file", "healthcheck", "Prometheus metrics"} {
+	for _, want := range []string{"Usage:", "-m, --metrics", "-l, --log-file", "healthcheck", "Prometheus metrics"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("help output is missing %q: %q", want, stdout.String())
 		}

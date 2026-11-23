@@ -24,20 +24,25 @@ func parseCLIOptions(args []string, metricsDefault string, output, errorOutput i
 	flags := flag.NewFlagSet("fakessh", flag.ContinueOnError)
 	flags.SetOutput(errorOutput)
 	flags.StringVar(&options.metricsAddr, "metrics", metricsDefault, "Prometheus listen address; serves /metrics and /healthz")
+	flags.StringVar(&options.metricsAddr, "m", metricsDefault, "Prometheus listen address; serves /metrics and /healthz")
 	flags.StringVar(&options.logFile, "log-file", "", "Write logs to this file (default: stderr)")
+	flags.StringVar(&options.logFile, "l", "", "Write logs to this file (default: stderr)")
 	flags.BoolVar(&options.help, "help", false, "Print usage, flags, and operating messages")
 	flags.BoolVar(&options.help, "h", false, "Print usage, flags, and operating messages")
 	flags.Usage = func() {
 		_, _ = io.WriteString(output, "FakeSSH runs an SSH honeypot that records login attempts and rejects password authentication.\n\nUsage:\n  fakessh [flags]\n  fakessh healthcheck [flags]\n\nFlags:\n")
 		flags.VisitAll(func(f *flag.Flag) {
-			if f.Name == "h" {
+			if f.Name == "h" || f.Name == "m" || f.Name == "l" {
 				return
 			}
-			name := "--" + f.Name
-			if f.Name == "help" {
+			name := "--" + f.Name + " string"
+			switch f.Name {
+			case "help":
 				name = "-h, --help"
-			} else {
-				name += " string"
+			case "log-file":
+				name = "-l, --log-file string"
+			case "metrics":
+				name = "-m, --metrics string"
 			}
 			_, _ = fmt.Fprintf(output, "  %-24s %s", name, f.Usage)
 			if f.DefValue != "" && f.DefValue != "false" {
