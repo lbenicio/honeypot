@@ -7,8 +7,6 @@
 A dockerized honeypot SSH server written in Go to log login attempts.
 Password authentications always fail so no terminal access is given to the attacker.
 
-[![](https://hub.docker.com/lbenicio/fakessh)](https://hub.docker.com/lbenicio/fakessh)
-
 ## Quick Start
 
 ```
@@ -20,13 +18,13 @@ sudo setcap 'cap_net_bind_service=+ep' ./dist/fakessh
 OR
 
 ```
-docker run -it --rm -p 22:22 fffaraz/fakessh
+docker run -it --rm -p 22:22 lbenicio/fakessh
 ```
 
 OR
 
 ```
-docker run -d --restart=always -p 22:22 --name fakessh fffaraz/fakessh
+docker run -d --restart=always -p 22:22 --name fakessh lbenicio/fakessh
 docker logs -f fakessh
 ```
 
@@ -36,7 +34,7 @@ FakeSSH exports Prometheus metrics at `http://localhost:2112/metrics` by default
 For Docker, publish both ports to scrape metrics from outside the container:
 
 ```
-docker run -d --restart=always -p 22:22 -p 2112:2112 --name fakessh fffaraz/fakessh
+docker run -d --restart=always -p 22:22 -p 2112:2112 --name fakessh lbenicio/fakessh
 ```
 
 Set `PROMETHEUS_ADDR` to change the metrics listener address. When running
@@ -86,7 +84,7 @@ already exists.
 Configure the `DOCKERHUB_USERNAME` repository variable and a Docker Hub
 personal access token in the `DOCKERHUB_TOKEN` repository secret before running
 the workflow. The configured account must have permission to push to
-`fffaraz/fakessh`.
+`lbenicio/fakessh`.
 
 ### See also
 

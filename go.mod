@@ -1,4 +1,4 @@
-module github.com/fffaraz/fakessh
+module github.com/lbenicio/fakessh
 
 go 1.27.0
 

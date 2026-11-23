@@ -2,7 +2,7 @@ GO ?= go
 DOCKER ?= docker
 COMPOSE ?= $(DOCKER) compose
 GOLANGCI_LINT ?= golangci-lint
-IMAGE ?= fffaraz/fakessh
+IMAGE ?= lbenicio/fakessh
 VERSION ?= $(shell grep -E '\[[0-9]+\.[0-9]+\.[0-9]+.*\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$$' CHANGELOG.md | head -n 1 | cut -d '[' -f 2 | cut -d ']' -f 1)
 
 .DEFAULT_GOAL := all

@@ -91,7 +91,7 @@ jobs:
           check_absent "git/ref/tags/$TAG" "A Git tag"
 
           docker_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-            "https://hub.docker.com/v2/repositories/fffaraz/fakessh/tags/$VERSION")
+            "https://hub.docker.com/v2/repositories/lbenicio/fakessh/tags/$VERSION")
           if [[ "$docker_status" == "200" ]]; then
             echo "::error::Docker Hub tag $VERSION already exists; refusing to overwrite it."
             exit 1
@@ -133,8 +133,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            fffaraz/fakessh:${{ steps.version.outputs.version }}
-            fffaraz/fakessh:latest
+            lbenicio/fakessh:${{ steps.version.outputs.version }}
+            lbenicio/fakessh:latest
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
@@ -202,8 +202,8 @@ jobs:
 
           | Metric | Value |
           | --- | --- |
-          | Image | \`fffaraz/fakessh:${RELEASE_VERSION:-version}\` |
-          | Additional tag | \`fffaraz/fakessh:latest\` |
+          | Image | \`lbenicio/fakessh:${RELEASE_VERSION:-version}\` |
+          | Additional tag | \`lbenicio/fakessh:latest\` |
           | Platforms | \`linux/amd64\`, \`linux/arm64\` |
           | Image digest | \`${IMAGE_DIGEST:-not available}\` |
           EOF

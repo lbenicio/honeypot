@@ -1,7 +1,7 @@
 services:
   fakessh:
     container_name: fakessh
-    image: fffaraz/fakessh:latest
+    image: lbenicio/fakessh:latest
     build:
       context: ..
       dockerfile: deployment/Dockerfile
