@@ -87,7 +87,7 @@ jobs:
           exit "$status"
 
   test:
-    name: Test and collect coverage
+    name: Run tests and generate reports
     runs-on: ubuntu-latest
     outputs:
       started_at: ${{ steps.timer.outputs.started_at }}
@@ -97,6 +97,7 @@ jobs:
       skipped: ${{ steps.test.outputs.skipped }}
       coverage_percent: ${{ steps.test.outputs.coverage_percent }}
       coverage_available: ${{ steps.test.outputs.coverage_available }}
+      test_results_available: ${{ steps.test.outputs.test_results_available }}
       coverage_artifact_outcome: ${{ steps.coverage_artifact.outcome }}
     steps:
       - name: Start job timer
@@ -112,22 +113,33 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      - name: Install gotestsum
+        env:
+          GOTESTSUM_VERSION: v1.13.0
+        run: |
+          go install gotest.tools/gotestsum@"$GOTESTSUM_VERSION"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
       - name: Test
         id: test
         shell: bash
         run: |
           started_at=$(date +%s)
           set +e
-          go test -coverprofile=coverage.out -covermode=atomic -v ./... 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+          gotestsum --junitfile=test-results.xml --format=standard-verbose -- -coverprofile=coverage.out -covermode=atomic -v ./... 2>&1 | tee "$RUNNER_TEMP/go-test.log"
           status=${PIPESTATUS[0]}
           set -e
 
           coverage_percent="unavailable"
           coverage_available=false
+          test_results_available=false
           if [[ -f coverage.out ]]; then
             coverage_available=true
             coverage_percent=$(go tool cover -func=coverage.out 2>/dev/null | awk '$1 == "total:" {print $3}' || true)
             coverage_percent="${coverage_percent:-unavailable}"
+          fi
+          if [[ -s test-results.xml ]]; then
+            test_results_available=true
           fi
 
           if [[ "$status" -eq 0 ]]; then
@@ -144,33 +156,40 @@ jobs:
             echo "skipped=$(grep -c '^--- SKIP:' "$RUNNER_TEMP/go-test.log" || true)"
             echo "coverage_percent=$coverage_percent"
             echo "coverage_available=$coverage_available"
+            echo "test_results_available=$test_results_available"
           } >> "$GITHUB_OUTPUT"
           exit "$status"
 
       - name: Upload coverage artifact
         id: coverage_artifact
-        if: always() && hashFiles('coverage.out') != ''
+        if: always() && (hashFiles('coverage.out') != '' || hashFiles('test-results.xml') != '')
         continue-on-error: true
         uses: actions/upload-artifact@v7.0.2
         with:
           name: go-coverage
-          path: coverage.out
+          path: |
+            coverage.out
+            test-results.xml
           if-no-files-found: error
           retention-days: 1
 
   codecov:
-    name: Publish coverage to Codecov
-    if: always() && needs.test.outputs.coverage_available == 'true'
+    name: Publish coverage and test results to Codecov
+    if: always() && (needs.test.outputs.coverage_available == 'true' || needs.test.outputs.test_results_available == 'true')
     needs: [test]
     runs-on: ubuntu-latest
     outputs:
       started_at: ${{ steps.timer.outputs.started_at }}
       duration_seconds: ${{ steps.duration.outputs.duration_seconds }}
       upload_outcome: ${{ steps.codecov_upload.outcome }}
+      test_results_upload_outcome: ${{ steps.test_results_upload.outcome }}
     steps:
       - name: Start job timer
         id: timer
         run: echo "started_at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out source
+        uses: actions/checkout@v6
 
       - name: Download coverage artifact
         uses: actions/download-artifact@v8.0.2
@@ -178,14 +197,53 @@ jobs:
           name: go-coverage
           path: coverage
 
+      - name: Validate coverage profile paths
+        if: needs.test.outputs.coverage_available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          profile=coverage/coverage.out
+          if [[ ! -s "$profile" ]] || [[ "$(head -n 1 "$profile")" != "mode: atomic" ]]; then
+            echo "::error::The downloaded Go coverage profile is missing or invalid."
+            exit 1
+          fi
+
+          mapfile -t source_files < <(awk 'NR > 1 { sub(/:[0-9].*/, "", $1); print $1 }' "$profile" | sort -u)
+          if ((${#source_files[@]} == 0)); then
+            echo "::error::The Go coverage profile contains no source files."
+            exit 1
+          fi
+
+          for source_file in "${source_files[@]}"; do
+            repository_path="${source_file#github.com/lbenicio/fakessh/}"
+            if [[ "$repository_path" == "$source_file" || ! -f "$repository_path" ]]; then
+              echo "::error::Coverage path does not map to a checked-out source file: $source_file"
+              exit 1
+            fi
+          done
+          echo "Validated ${#source_files[@]} source files in the coverage profile."
+
       - name: Upload coverage to Codecov
         id: codecov_upload
-        continue-on-error: true
+        if: needs.test.outputs.coverage_available == 'true'
         uses: codecov/codecov-action@v7.1.1
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage/coverage.out
+          report_type: coverage
+          disable_search: true
           fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        id: test_results_upload
+        if: ${{ !cancelled() && needs.test.outputs.test_results_available == 'true' }}
+        uses: codecov/codecov-action@v7.1.1
+        with:
+          files: coverage/test-results.xml
+          report_type: test_results
+          disable_search: true
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Record Codecov job duration
         id: duration
@@ -221,6 +279,7 @@ jobs:
           CODECOV_STARTED_AT: ${{ needs.codecov.outputs.started_at }}
           CODECOV_SECONDS: ${{ needs.codecov.outputs.duration_seconds }}
           CODECOV_UPLOAD_OUTCOME: ${{ needs.codecov.outputs.upload_outcome }}
+          CODECOV_TEST_RESULTS_OUTCOME: ${{ needs.codecov.outputs.test_results_upload_outcome }}
           GO_VERSION: ${{ needs.build.outputs.go_version }}
           WORKFLOW_NAME: ${{ github.workflow }}
           EVENT_NAME: ${{ github.event_name }}
@@ -259,9 +318,10 @@ jobs:
           | --- | --- | ---: |
           | Build binary | ${BUILD_STATUS:-not run} | ${BUILD_SECONDS:-—}s |
           | Format and lint | ${LINT_STATUS:-not run} | ${LINT_SECONDS:-—}s |
-          | Test and collect coverage | ${TEST_STATUS:-not run} | ${TEST_SECONDS:-—}s |
-          | Coverage artifact | ${COVERAGE_ARTIFACT_OUTCOME:-not run} | — |
+          | Run tests and generate reports | ${TEST_STATUS:-not run} | ${TEST_SECONDS:-—}s |
+          | Test and coverage report artifacts | ${COVERAGE_ARTIFACT_OUTCOME:-not run} | — |
           | Publish coverage to Codecov | ${CODECOV_UPLOAD_OUTCOME:-${CODECOV_JOB_STATUS:-not run}} | ${CODECOV_SECONDS:-—}s |
+          | Publish test results to Codecov | ${CODECOV_TEST_RESULTS_OUTCOME:-${CODECOV_JOB_STATUS:-not run}} | — |
 
           ### Test cases
 

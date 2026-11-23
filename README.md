@@ -71,11 +71,11 @@ applies available lint fixes. The unit-test workflow runs `make lint`.
 
 ### Code coverage
 
-The CI workflow uploads Go coverage reports to Codecov. Configure the
-`CODECOV_TOKEN` repository secret with the upload token for this repository.
-Codecov upload status and total coverage appear in each workflow summary. To
-upload from Dependabot-triggered runs, also add the token under Dependabot
-secrets. Coverage is reported when Go tests produce a `coverage.out` profile.
+The CI workflow uploads Go coverage and JUnit test results to Codecov. It
+passes `CODECOV_TOKEN` when configured; the public repository currently allows
+tokenless uploads. Codecov upload status and total coverage appear in each
+workflow summary. The upload job checks out the matching source and validates
+coverage paths before upload.
 
 ### Releases
 

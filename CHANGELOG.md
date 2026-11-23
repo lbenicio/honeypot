@@ -24,6 +24,8 @@ Notable changes to this project are documented here. This changelog follows
 
 ### Changed
 
+- Validate Go coverage source paths and map module paths to repository paths.
+  Added Codecov JUnit test result reporting.
 - Split the Go application into domain-focused packages for authentication,
   health checks, metrics, and SSH serving, with startup and logging at the
   application layer.
